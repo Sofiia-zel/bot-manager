@@ -3,8 +3,10 @@ from telebot import types, TeleBot
 from dotenv import load_dotenv
 import os
 from datetime import datetime, timezone, timedelta, tzinfo
-from notion_integration import create_page, show_people_names, show_existing_events
+from notion_integration import (create_page, show_people_names, show_existing_events,
+                                find_page_id_by_name, delete_page, update_page)
 import pytz
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
 load_dotenv()
@@ -74,7 +76,7 @@ def process_greeting_text_step(message):
     # Передаём все собранные данные в функцию для создания страницы
     create_page(user_data)
 
-    bot.send_message(message.chat.id, "Подію створено!")
+    bot.send_message(message.chat.id, "Подію створено! Запис додано до бази даних Notion.")
 
 # TODO Исправить ошибку с временем (или забить на нее)
 # Установка на 8:00 по Киеву для process_date_step
@@ -117,6 +119,99 @@ def show_events(message):
     # Объединяем всё в один текст и выводим
     final_output = "\n".join(output)
     bot.send_message(message.chat.id, f"Імена іменинників та назви свят, наявні в базі:\n\n{final_output}")
+
+
+# ОБРОБКА ФУНКЦІЇ ВИДАЛИТИ ПОДІЮ
+@bot.message_handler(func=lambda message: message.text == "❌ Видалити подію")
+def delete_event_handler(message):
+    msg = bot.send_message(message.chat.id, "Введіть ім'я/назву події для видалення або введіть 'відміна':")
+    bot.register_next_step_handler(msg, handle_delete_name)
+
+
+def handle_delete_name(name_message):
+    name = name_message.text.strip()
+
+    if name.lower() == "відміна":
+        bot.send_message(name_message.chat.id, "Видалення скасовано.")
+        start(name_message)  # Вернуть в главное меню, если нужно
+        return
+
+    # Ищем ID страницы по названию
+    page_id = find_page_id_by_name(name)
+    if page_id:
+        delete_page(page_id, name_message)
+        bot.send_message(name_message.chat.id, "Подію успішно видалено з бази!")
+        start(name_message)
+    else:
+        bot.send_message(name_message.chat.id, "Подія з такою назвою не знайдена.")
+
+
+#  ОБРОБКА ФУНКЦІЇ ОНОВИТИ ПОДІЮ
+@bot.message_handler(func=lambda message: message.text == "🔄 Оновити подію")
+def start_update_event(message):
+    msg = bot.send_message(message.chat.id, "Введіть ім'я/назву події, яку хочете оновити, або введіть 'відміна':")
+    bot.register_next_step_handler(msg, process_event_name_for_update)
+
+bot_data = {}
+
+def process_event_name_for_update(message):
+    if message.text.lower() == "відміна":
+        bot.send_message(message.chat.id, "Оновлення скасовано.")
+        start(message)
+        return
+
+    event_name = message.text
+    page_id = find_page_id_by_name(event_name)
+
+    if not page_id:
+        bot.send_message(message.chat.id, "Подію не знайдено. Перевірте назву та спробуйте ще раз.")
+        return
+
+    # Сохранение page_id для дальнейшего использования
+    bot_data[message.chat.id] = {"page_id": page_id, "event_name": event_name}
+
+    # Создание инлайн-кнопок для выбора обновления
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("Оновити ім'я/назву", callback_data="update_name"),
+        InlineKeyboardButton("Оновити текст", callback_data="update_text"),
+        InlineKeyboardButton("Оновити дату події", callback_data="update_date")
+    )
+    bot.send_message(message.chat.id, "Оберіть, що саме ви хочете оновити:", reply_markup=markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("update_"))
+def handle_update_selection(call):
+    chat_id = call.message.chat.id
+    action = call.data
+    page_id = bot_data[chat_id]["page_id"]
+
+    if action == "update_name":
+        msg = bot.send_message(chat_id, "Введіть нове ім'я/назву:")
+        bot.register_next_step_handler(msg, lambda m: update_single_field(m, page_id, "Ім'я/назва"))
+
+    elif action == "update_text":
+        msg = bot.send_message(chat_id, "Введіть новий текст привітання:")
+        bot.register_next_step_handler(msg, lambda m: update_single_field(m, page_id, "Текст привітання"))
+
+    elif action == "update_date":
+        msg = bot.send_message(chat_id, "Введіть нову дату у форматі YYY-MM-DD:")
+        bot.register_next_step_handler(msg, lambda m: update_single_field(m, page_id, "Дата"))
+
+
+def update_single_field(message, page_id, field):
+    new_value = message.text
+    updated_data = {}
+
+    if field == "Ім'я/назва":
+        updated_data[field] = {"title": [{"text": {"content": new_value}}]}
+    elif field == "Текст привітання":
+        updated_data[field] = {"rich_text": [{"text": {"content": new_value}}]}
+    elif field == "Дата":
+        updated_data[field] = {"date": {"start": new_value}}
+
+    result = update_page(page_id, updated_data)
+    bot.send_message(message.chat.id, result)
 
 
 bot.polling()

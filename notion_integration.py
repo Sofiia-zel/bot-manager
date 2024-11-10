@@ -3,6 +3,7 @@ import requests
 import threading    # для відстежування часу, тригер на час
 from datetime import datetime, timezone, timedelta
 import os
+import json
 
 
 # "object": "page" - это название одной строки таблицы
@@ -111,9 +112,56 @@ def show_existing_events():
     return events_dict
 
 
+def find_page_id_by_name(name: str) -> str:
+    headers, DATABASE_ID = get_notion_headers()
+    url = f'https://api.notion.com/v1/databases/{DATABASE_ID}/query'
+
+    # Настройка фильтрации по заголовку
+    payload = {
+        "filter": {
+            "property": "Ім'я/назва",  # Точное имя свойства, как в базе данных Notion
+            "title": {
+                "equals": name  # Проверка полного совпадения названия
+            }
+        }
+    }
+
+    res = requests.post(url, json=payload, headers=headers)
+    data = res.json()
+
+    # Проверка, чтобы убедиться, что запрос успешен и есть результаты
+    if res.status_code == 200 and data.get("results"):
+        page_id = data["results"][0]["id"]
+        return page_id
+    else:
+        return ""
+
+
+def delete_page(page_id: str, message):
+    headers, _ = get_notion_headers()
+    url = f"https://api.notion.com/v1/pages/{page_id}"
+    payload = {"archived": True}
+    res = requests.patch(url, json=payload, headers=headers)
+    return res
+
+
+def update_page(page_id: str, data: dict):
+    headers, DATABASE_ID = get_notion_headers()
+    url = f"https://api.notion.com/v1/pages/{page_id}"
+    payload = {"properties": data}
+
+    res = requests.patch(url, json=payload, headers=headers)
+
+    if res.status_code == 200:
+        return "Подія успішно оновлена!"
+    else:
+        return f"Помилка {res.status_code}: {res.json().get('message')}"
+
+
 
 # тренировка
 # def get_pages():
+#     headers, DATABASE_ID = get_notion_headers()
 #     url = f'https://api.notion.com/v1/databases/{DATABASE_ID}/query'
 #     payload = {'page_size': 100}
 #     response = requests.post(url, json=payload, headers=headers)
@@ -128,10 +176,11 @@ def show_existing_events():
 #
 #     results = data['results']
 #     return results
-#
-#
+
+
 # pages = get_pages()  # Запит на діставання json
-#
+
+
 # with open('data.json', 'r', encoding='utf-8') as f:
 #     data = json.load(f)
 #
