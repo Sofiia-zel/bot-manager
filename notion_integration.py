@@ -1,6 +1,5 @@
 from dotenv import load_dotenv
 import requests
-import threading    # для відстежування часу, тригер на час
 from datetime import datetime, timezone, timedelta
 import os
 import json
@@ -77,40 +76,30 @@ def show_existing_events():
         return "Ключ 'results' не найден в файле."
 
     events_dict = {}  # Словарь для сбора информации о событиях
-    event_number = 1  # Начинаем с 1
+    event_number = 1  # Нумерация событий
 
     pages = data['results']
     for page in pages:
         props = page['properties']
-
-        # Инициализируем структуру для одного события
-        event_data = {}
-
+        event_data = {"Ім'я/назва": props.get("Ім'я/назва", {}).get("title", [{}])[0].get("text", {}).get("content",
+                                                                                                          "Назва пуста.")}
         # Извлекаем значение "Ім'я/назва"
-        if "Ім'я/назва" in props and len(props["Ім'я/назва"]["title"]) > 0:
-            event_data["Ім'я/назва"] = props["Ім'я/назва"]["title"][0]["text"]["content"]
-        else:
-            event_data["Ім'я/назва"] = "Назва пуста."
-
-        # Извлекаем значение "Дата"
-        if "Дата" in props and "date" in props["Дата"] and props["Дата"]["date"] is not None:
-            full_date = props["Дата"]["date"]["start"]
-            # Обрезаем строку до символа 'T', используем форматирование
-            event_data["Дата"] = datetime.fromisoformat(full_date).strftime('%d-%m-%Y')
+        # Извлекаем значение "Дата" с временем в ISO-формате
+        date_prop = props.get("Дата", {}).get("date")
+        if date_prop and date_prop["start"]:
+            event_data["Дата"] = date_prop["start"]
         else:
             event_data["Дата"] = "Дата не указана."
 
         # Извлекаем значение "Текст привітання"
-        if "Текст привітання" in props and len(props["Текст привітання"]["rich_text"]) > 0:
-            event_data["Текст привітання"] = props["Текст привітання"]["rich_text"][0]["text"]["content"]
-        else:
-            event_data["Текст привітання"] = "Привітання відсутнє."
+        event_data["Текст привітання"] = props.get("Текст привітання", {}).get("rich_text", [{}])[0].get("text", {}).get("content", "Привітання відсутнє.")
 
         events_dict[event_number] = event_data
         event_number += 1  # Увеличиваем номер для следующего события
 
     return events_dict
 
+# print(show_existing_events())
 
 def find_page_id_by_name(name: str) -> str:
     headers, DATABASE_ID = get_notion_headers()

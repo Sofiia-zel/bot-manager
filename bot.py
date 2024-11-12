@@ -2,6 +2,8 @@ import telebot
 from telebot import types, TeleBot
 from dotenv import load_dotenv
 import os
+import time
+import threading
 from datetime import datetime, timezone, timedelta, tzinfo
 from notion_integration import (create_page, show_people_names, show_existing_events,
                                 find_page_id_by_name, delete_page, update_page)
@@ -20,11 +22,12 @@ user_data = {}
 def start(message):
     keyboard = types.ReplyKeyboardMarkup(row_width=3, resize_keyboard=True)
     add_event_btn = types.KeyboardButton("➕ Додати нову подію")
-    show_events_btn = types.KeyboardButton("📅 Показати події")
+    show_events_btn = types.KeyboardButton("🗒 Показати події")
     update_btn = types.KeyboardButton("🔄 Оновити подію")
     delete_btn = types.KeyboardButton("❌ Видалити подію")
     show_people_btn = types.KeyboardButton("👥 Показати імена та назви свят")
-    keyboard.add(add_event_btn, show_events_btn, update_btn, delete_btn, show_people_btn)
+    calendar_btn = types.KeyboardButton("📅 Календар подій")
+    keyboard.add(add_event_btn, show_events_btn, update_btn, delete_btn, show_people_btn, calendar_btn)
     bot.send_message(message.chat.id, "Вас вітає бот-менеджер! Виберіть необхідну функцію з переліку.", reply_markup=keyboard)
 
 
@@ -38,6 +41,15 @@ def add_new_event(message):
             # Если введено "відміна", показываем главное меню и подтверждаем отмену
             bot.send_message(message.chat.id, "Відміну підтверджено!")
             start(name_message)
+        # TODO реалізувати перевірку на наявність введеної користувачем назви у базі
+        # elif name_message.text.lower() in show_people_names():
+        #     markup = types.InlineKeyboardMarkup()
+        #     markup.add(types.InlineKeyboardButton("Оновити існуюче", callback_data=f"update_{name_message}"))
+        #     markup.add(types.InlineKeyboardButton("Ввести іншу назву", callback_data="new_name"))
+        #     bot.send_message(
+        #         message.chat.id,
+        #         f"Подія з назвою '{name_message}' вже існує. Ви хочете оновити її або ввести іншу назву?",
+        #         reply_markup=markup
         else:
             # Передаём название в process_name_step для обработки
             process_name_step(name_message)
@@ -78,7 +90,7 @@ def process_greeting_text_step(message):
 
     bot.send_message(message.chat.id, "Подію створено! Запис додано до бази даних Notion.")
 
-# TODO Исправить ошибку с временем (или забить на нее)
+
 # Установка на 8:00 по Киеву для process_date_step
 def get_kiev_time(date):
     kiev_tz = pytz.timezone('Europe/Kiev')
@@ -92,19 +104,19 @@ def get_kiev_time(date):
 # ОБРОБКА ФУНКЦІЇ ПОКАЗАТИ ІМЕНА ПОДІЙ
 @bot.message_handler(func=lambda message: message.text == "👥 Показати імена та назви свят")
 def show_people(message):
-    msg = bot.send_message(message.chat.id, f"Імена іменинників та назви свят, наявні в базі:\n{show_people_names()}")
+    bot.send_message(message.chat.id, f"Імена іменинників та назви свят, наявні в базі:\n{show_people_names()}")
     bot.send_message(message.chat.id, "Бажаєте побачити весь текст подій, додати нову подію або оновити наявну?\n"
                                       "Ви можете зробити це за кнопками '📅 Показати події', '➕ Додати нову подію', "
                                       "'🔄 Оновити подію'.")
 
 
 # ОБРОБКА ФУНКЦІЇ ПОКАЗАТИ ПОДІЇ
-@bot.message_handler(func=lambda message: message.text == "📅 Показати події")
+@bot.message_handler(func=lambda message: message.text == "🗒 Показати події")
 def show_events(message):
     events = show_existing_events()
     if isinstance(events, str):  # Если вернулась ошибка
         bot.send_message(message.chat.id, events)
-        return
+        return bot.send_message(message.chat.id, events)
 
     # Форматируем и выводим информацию о каждом событии
     output = []
@@ -212,6 +224,75 @@ def update_single_field(message, page_id, field):
 
     result = update_page(page_id, updated_data)
     bot.send_message(message.chat.id, result)
+
+
+@bot.message_handler(func=lambda message: message.text == "📅 Календар подій")
+def handle_calendar_events(message):
+    msg = bot.send_message(message.chat.id, "Введіть назви подій через кому, для яких потрібно запланувати привітання.")
+    bot.register_next_step_handler(msg, process_event_names, message.chat.id)
+
+def process_event_names(message, chat_id):
+    event_names = [name.strip() for name in message.text.split(",")]
+    events_dict = show_existing_events()  # Получаем события из базы данных
+    # Фильтруем события, чтобы оставить только те, что есть в БД
+    selected_events = [event for event in events_dict.values() if event["Ім'я/назва"] in event_names]
+    if not selected_events:
+        bot.send_message(chat_id, "Жодної з введених подій не знайдено у базі даних.")
+        return
+
+    # Добавляем chat_id к каждому событию и передаем в поток для отправки поздравлений
+    for event in selected_events:
+        event["chat_id"] = chat_id
+
+    setup_greeting_timers(selected_events)
+    bot.send_message(chat_id, "Привітання для вибраних подій будуть надіслані у визначений час.")
+
+# Поток для отправки поздравлений
+def send_greeting(event):
+    """Отправка текста привітання и удаление события из БД."""
+    chat_id = event.get('chat_id')
+    greeting_text = event.get("Текст привітання")
+    event_name = event.get("Ім'я/назва")
+    event_time = event.get("Дата")
+
+    # Отправляем поздравление
+    bot.send_message(chat_id, f"{event_name}:\n{greeting_text}")
+
+    # Удаляем событие из БД
+    page_id = event.get("page_id")
+    if page_id:
+        delete_page(page_id, message=chat_id)  # передаем chat_id как параметр
+
+
+def check_events(events):
+    """Проверка списка событий и отправка поздравлений в указанное время."""
+    while events:
+        current_time = datetime.now().astimezone()  # Устанавливаем временную зону для текущего времени
+
+        for event in events[:]:  # Используем копию списка для удаления
+            event_time_str = event["Дата"]
+            try:
+                event_time = datetime.fromisoformat(event_time_str)  # Конвертируем в datetime с учетом временной зоны
+            except ValueError:
+                bot.send_message(events.chat.id, f"Ошибка: некорректный формат даты для события {event['Ім\'я/назва']}")
+                continue
+
+            # Логирование для отслеживания времени
+            print(f"Текущее время: {current_time}, Время события: {event_time}")
+
+            if event_time <= current_time:
+                send_greeting(event)
+                events.remove(event)  # Удаляем событие из списка для предотвращения повторной отправки
+                print(f"Поздравление отправлено для события: {event['Ім\'я/назва']}")
+
+        time.sleep(10)
+
+
+def setup_greeting_timers(events):
+    """Настройка и запуск потока для отправки поздравлений на указанные даты."""
+    greeting_thread = threading.Thread(target=check_events, args=(events,))
+    greeting_thread.daemon = True
+    greeting_thread.start()
 
 
 bot.polling()
