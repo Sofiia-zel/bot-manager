@@ -25,7 +25,7 @@ def start(message):
     show_events_btn = types.KeyboardButton("🗒 Показати події")
     update_btn = types.KeyboardButton("🔄 Оновити подію")
     delete_btn = types.KeyboardButton("❌ Видалити подію")
-    show_people_btn = types.KeyboardButton("👥 Показати імена та назви свят")
+    show_people_btn = types.KeyboardButton("👥 Показати та назви подій")
     calendar_btn = types.KeyboardButton("📅 Календар подій")
     keyboard.add(add_event_btn, show_events_btn, update_btn, delete_btn, show_people_btn, calendar_btn)
     bot.send_message(message.chat.id, "Вас вітає бот-менеджер! Виберіть необхідну функцію з переліку.", reply_markup=keyboard)
@@ -104,7 +104,7 @@ def get_kiev_time(date):
 # ОБРОБКА ФУНКЦІЇ ПОКАЗАТИ ІМЕНА ПОДІЙ
 @bot.message_handler(func=lambda message: message.text == "👥 Показати імена та назви свят")
 def show_people(message):
-    bot.send_message(message.chat.id, f"Імена іменинників та назви свят, наявні в базі:\n{show_people_names()}")
+    bot.send_message(message.chat.id, f"Імена та назви свят, наявні в базі:\n{show_people_names()}")
     bot.send_message(message.chat.id, "Бажаєте побачити весь текст подій, додати нову подію або оновити наявну?\n"
                                       "Ви можете зробити це за кнопками '📅 Показати події', '➕ Додати нову подію', "
                                       "'🔄 Оновити подію'.")
@@ -130,7 +130,7 @@ def show_events(message):
 
     # Объединяем всё в один текст и выводим
     final_output = "\n".join(output)
-    bot.send_message(message.chat.id, f"Імена іменинників та назви свят, наявні в базі:\n\n{final_output}")
+    bot.send_message(message.chat.id, f"Імена та назви подій, наявні в базі:\n\n{final_output}")
 
 
 # ОБРОБКА ФУНКЦІЇ ВИДАЛИТИ ПОДІЮ
@@ -203,7 +203,7 @@ def handle_update_selection(call):
         bot.register_next_step_handler(msg, lambda m: update_single_field(m, page_id, "Ім'я/назва"))
 
     elif action == "update_text":
-        msg = bot.send_message(chat_id, "Введіть новий текст привітання:")
+        msg = bot.send_message(chat_id, "Введіть новий текст події:")
         bot.register_next_step_handler(msg, lambda m: update_single_field(m, page_id, "Текст привітання"))
 
     elif action == "update_date":
@@ -228,7 +228,7 @@ def update_single_field(message, page_id, field):
 
 @bot.message_handler(func=lambda message: message.text == "📅 Календар подій")
 def handle_calendar_events(message):
-    msg = bot.send_message(message.chat.id, "Введіть назви подій через кому, для яких потрібно запланувати привітання.")
+    msg = bot.send_message(message.chat.id, "Введіть назви подій через кому, для яких потрібно запланувати нагадування/привітання.")
     bot.register_next_step_handler(msg, process_event_names, message.chat.id)
 
 def process_event_names(message, chat_id):
@@ -245,7 +245,7 @@ def process_event_names(message, chat_id):
         event["chat_id"] = chat_id
 
     setup_greeting_timers(selected_events)
-    bot.send_message(chat_id, "Привітання для вибраних подій будуть надіслані у визначений час.")
+    bot.send_message(chat_id, "Привітання/нагадування для вибраних подій будуть надіслані у визначений час.")
 
 # Поток для отправки поздравлений
 def send_greeting(event):
